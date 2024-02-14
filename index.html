@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<title>Magic Lines Screensaver</title>
+		<meta name="description" content="Remember this screensaver from the 90s?">
+		<meta name="author" content="Eric Segerson">
+		<style>
+			HTML, BODY { 
+				margin: 0; 
+				overflow: hidden;
+				background-color: #000; 
+				background-image: repeating-linear-gradient(#000 0px, #000 2px, #111 2px, #111 4px);
+				color: #fff; 
+				font-family: monospace; 
+				width: 100vw;
+				height: 100vh;
+			}
+			DIV.content { position: relative; margin-left: 20px; text-shadow: 2px 2px 1px black; z-index: 1; }
+			DIV.content > P { line-height: 10.2px; /* to sync subpixel aliasing with H1 when scrolling */ }
+			#svg { width: 100%; height: 100%; position: absolute; top: 0; mix-blend-mode: screen; }
+			#svg.rough > g { shape-rendering: crispEdges; }
+			#svg > g > line { stroke-width: 1px; }
+			#svg:not(.rough) > g > * {
+				mix-blend-mode: screen;
+				/*mix-blend-mode: lighten;
+				mix-blend-mode: overlay;
+				mix-blend-mode: color-dodge;
+				mix-blend-mode: color-burn;
+				mix-blend-mode: hard-light;
+				mix-blend-mode: soft-light;*/
+				opacity: 0.2;
+				stroke-width: 3px;
+				stroke-linecap: round;
+			}
+		</style>
+		<script>
+			//Constants
+			//const colors = ["#f00", "#0f0", "#00f"];//, "#ff0", "#0ff", "#f0f"]; //This also determines the number of line-groups
+			const numGroups = 3;
+			var hues = [];
+			for (var i = 0; i < 360; i += 360 / numGroups)
+				hues.push(Math.round(i, 0));
+			//const hues = [0, 120, 240]; //degrees on HSL wheel:  Red, Green, Blue
+			const maxLuminescence = 0.9; //50% is equiv to #f00 for Red, 0% = black, 100% = white
+			const maxLines = 100;
+			const maxV = 500; //pixels per second
+			const desiredFramerate = 30; //frames per second
+			
+			//Global variables
+			var w, h; //Dimensions of screen
+			var lines = new Object(); //Holds all the line data and algorithms
+			var rSpeed = 0; //Degrees per frame
+			var pause = false;
+			var interval;
+			
+			document.addEventListener('DOMContentLoaded', function() {
+				//Page Load
+				window.onresize = function() {
+					var s = document.getElementById("svg");
+					w = s.getBoundingClientRect().width;
+					h = s.getBoundingClientRect().height;
+				};
+				window.dispatchEvent(new Event('resize'));
+				
+				//Build object
+				lines = { 
+					groups: new Array(),
+					newRandomPoint: function() {
+						return { 
+							x: Math.random() * (w - 100) + 50, 	//50px margin
+							y: Math.random() * (h - 100) + 50 	//50px margin
+						};
+					},
+					newRandomV: function() {
+						return {
+							x: Math.random() * maxV / desiredFramerate - maxV / 2 / desiredFramerate,
+							y: Math.random() * maxV / desiredFramerate - maxV / 2 / desiredFramerate
+						};
+					},
+					draw: function() {
+						//Hide title
+						var c = document.getElementsByClassName("content")[0];
+						var cPos = c.style.top.replace("px", "") * 1.01; //Accelerates
+						if (cPos < -200) cPos = -200;
+						c.style.top = cPos + "px";
+					
+						//Remove old lines
+						var domLines = document.getElementsByTagName("line");
+						if (domLines != undefined && domLines.length > maxLines * hues.length)
+							for (var i = 0; i < domLines.length - maxLines * hues.length; i++)
+								domLines[i].remove();
+						
+						//Draw new lines
+						var s = document.getElementById("g");
+						for (var i = 0; i < this.groups.length; i++) {
+							var l = this.groups[i].frontline;
+							var svgl = document.createElementNS("http://www.w3.org/2000/svg", "line");
+							svgl.setAttribute('x1', l.p0.x);
+							svgl.setAttribute('y1', l.p0.y);
+							svgl.setAttribute('x2', l.p1.x);
+							svgl.setAttribute('y2', l.p1.y);
+							var lum = this.luminescence(this.groups[i].length());
+							var hsl = "hsl(" + this.groups[i].hue + ",100%," + lum + ")";
+							svgl.setAttribute("stroke", hsl);
+							s.append(svgl);
+						}
+						
+						//Rotate the screen
+						if (rSpeed == 0) {
+							s.style.transform = "";
+						} else {
+							var r = s.style.transform.replace("rotate(", "").replace("deg)", "") * 1 + rSpeed;
+							s.style.transform = "rotate(" + r + "deg)";
+						}
+					}, 
+					luminescence: function(length) {
+						var val = Math.pow(0.01, length / 1000);
+						var rv = Math.round(val * 105, 0) + "%";
+						return rv;
+						//var x = 100 / length;
+						//return x * 100 + "%";
+						var rv = 100 - length / 10;
+						if (rv < 10) rv = 10;
+						return "50%";
+						return rv + "%";
+					}
+				};
+				
+				//Fill object with line groups, one for each color defined above
+				for (var i = 0; i < hues.length; i++) {
+					lines.groups.push({
+						hue: hues[i],
+						frontline: { p0: lines.newRandomPoint(), p1: lines.newRandomPoint() },
+						v0: lines.newRandomV(),
+						v1: lines.newRandomV(),
+						process: function() {
+							//Move and bounce both ends of a line
+							this.movePoint(this.frontline.p0, this.v0);
+							this.movePoint(this.frontline.p1, this.v1);
+						},
+						movePoint: function(p, v) {
+							//Move and bounce one end of a line
+							p.x += v.x;
+							p.y += v.y;
+							if ((p.x > w && v.x > 0) || (p.x < 0 && v.x < 0)) v.x *= -1;
+							if ((p.y > h && v.y > 0) || (p.y < 0 && v.y < 0)) v.y *= -1;
+						},
+						length: function() {
+							var dx = Math.abs(this.frontline.p0.x - this.frontline.p1.x);
+							var dy = Math.abs(this.frontline.p0.y - this.frontline.p1.y);
+							var r = Math.pow(Math.pow(dx, 2) + Math.pow(dy, 2), 0.5); //Pythag
+							return r;
+						}
+					});
+				}
+				
+				//Animate
+				start();
+			}, false);
+			
+			document.onkeypress = function (e) {
+				e = e || window.event;
+				console.log(e.keyCode);
+				if (e.keyCode == 122) { //Z
+					var s = document.getElementById("svg");
+					document.getElementsByClassName("content")[0].style.top = "-1.5px";
+					if (s.classList.contains("rough"))
+						s.classList.remove("rough");
+					else
+						s.classList.add("rough");
+				}
+				
+				if (e.keyCode == 120) { //X
+					if (rSpeed == 0) rSpeed = 0.1; else rSpeed = 0;
+					document.getElementsByClassName("content")[0].style.top = "-1.5px";
+				}
+				
+				if (e.keyCode == 32) { //Space
+					pause = !pause;
+					if (pause) clearInterval(interval); else start();
+				}
+			};
+			
+			function start() {
+				interval = setInterval(function() {
+					//Process each line group
+					for (var i = 0; i < lines.groups.length; i++)
+						lines.groups[i].process();
+					//Draw results
+					lines.draw();
+				}, 1000 / desiredFramerate);
+			}
+		</script>
+	</head>
+	<body>
+		<div class="content" style="top: -1.5px">
+			<h1>Magic Lines Screensaver</h1>
+			<p>Press <b>Z</b> to toggle old-skool rendering.  Press <b>X</b> to rotate.</p>
+		</div>
+		<svg id="svg" class="rough">
+			<g id="g"></g>
+		</svg>
+	</body>
+</html>
